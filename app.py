@@ -126,10 +126,8 @@ def init_schema():
     try:
         with conn.cursor() as cur:
             cur.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA_NAME}")
-            cur.execute(f"DROP TABLE IF EXISTS {SCHEMA_NAME}.ticket_messages")
-            cur.execute(f"DROP TABLE IF EXISTS {SCHEMA_NAME}.tickets")
             cur.execute(f"""
-                CREATE TABLE {SCHEMA_NAME}.tickets (
+                CREATE TABLE IF NOT EXISTS {SCHEMA_NAME}.tickets (
                     ticket_id   SERIAL PRIMARY KEY,
                     title       VARCHAR(255) NOT NULL,
                     status      VARCHAR(50)  NOT NULL DEFAULT 'open',
@@ -138,7 +136,7 @@ def init_schema():
                 )
             """)
             cur.execute(f"""
-                CREATE TABLE {SCHEMA_NAME}.ticket_messages (
+                CREATE TABLE IF NOT EXISTS {SCHEMA_NAME}.ticket_messages (
                     message_id   SERIAL PRIMARY KEY,
                     ticket_id    INTEGER NOT NULL
                                  REFERENCES {SCHEMA_NAME}.tickets(ticket_id) ON DELETE CASCADE,
@@ -219,6 +217,17 @@ LIST_TICKETS_HTML = BASE_HTML.replace(
         <i class="bi bi-plus-lg"></i> New Ticket
       </a>
     </div>
+    <form method="get" action="{{ url_for('list_tickets') }}" class="mb-3 d-flex align-items-center gap-2">
+      <label class="form-label mb-0 text-muted">Filter by status:</label>
+      <select name="status" class="form-select" style="width: auto;" onchange="this.form.submit()">
+        <option value="" {{ 'selected' if not current_filter else '' }}>All</option>
+        <option value="open" {{ 'selected' if current_filter == 'open' else '' }}>Open</option>
+        <option value="in progress" {{ 'selected' if current_filter == 'in progress' else '' }}>In Progress</option>
+        <option value="resolved" {{ 'selected' if current_filter == 'resolved' else '' }}>Resolved</option>
+        <option value="closed" {{ 'selected' if current_filter == 'closed' else '' }}>Closed</option>
+      </select>
+      <button type="submit" class="btn btn-outline-secondary btn-sm">Apply</button>
+    </form>
     {% if tickets %}
     <div class="table-responsive">
       <table class="table table-hover align-middle">
@@ -249,8 +258,8 @@ LIST_TICKETS_HTML = BASE_HTML.replace(
     {% else %}
     <div class="text-center py-5">
       <i class="bi bi-inbox text-secondary" style="font-size: 3rem;"></i>
-      <h5 class="mt-3 text-secondary">No tickets yet</h5>
-      <a href="{{ url_for('new_ticket') }}" class="btn btn-primary mt-2">Create your first ticket</a>
+      <h5 class="mt-3 text-secondary">{% if current_filter %}No tickets with status "{{ current_filter }}"{% else %}No tickets yet{% endif %}</h5>
+      {% if not current_filter %}<a href="{{ url_for('new_ticket') }}" class="btn btn-primary mt-2">Create your first ticket</a>{% endif %}
     </div>
     {% endif %}
     """
@@ -351,17 +360,31 @@ NEW_TICKET_HTML = BASE_HTML.replace(
 
 @app.route("/")
 def list_tickets():
-    """View all support tickets."""
+    """View all support tickets, optionally filtered by status."""
+    status_filter = request.args.get("status", "").strip()
+    valid_statuses = {"open", "in progress", "resolved", "closed"}
+
     conn = get_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(f"""
-                SELECT ticket_id, title, status, created_by, created_at
-                FROM {SCHEMA_NAME}.tickets
-                ORDER BY created_at DESC
-            """)
+            if status_filter and status_filter in valid_statuses:
+                cur.execute(f"""
+                    SELECT ticket_id, title, status, created_by, created_at
+                    FROM {SCHEMA_NAME}.tickets
+                    WHERE status = %s
+                    ORDER BY created_at DESC
+                """, (status_filter,))
+            else:
+                cur.execute(f"""
+                    SELECT ticket_id, title, status, created_by, created_at
+                    FROM {SCHEMA_NAME}.tickets
+                    ORDER BY created_at DESC
+                """)
+                status_filter = ""
             tickets = cur.fetchall()
-        return render_template_string(LIST_TICKETS_HTML, tickets=tickets)
+        return render_template_string(
+            LIST_TICKETS_HTML, tickets=tickets, current_filter=status_filter
+        )
     finally:
         conn.close()
 
