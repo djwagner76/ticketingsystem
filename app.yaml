@@ -1,0 +1,8 @@
+command:
+  - python
+  - app.py
+env:
+  - name: LAKEBASE_URL
+    valueFrom: lakebase-url
+  - name: API_KEY
+    valueFrom: api-key
